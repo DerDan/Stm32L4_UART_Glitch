@@ -83,6 +83,8 @@
 
 static uint32_t patternBuffer[PATTERN_BUFFER_SIZE];
 static uint16_t dac_buffer[PATTERN_BUFFER_SIZE];
+static uint32_t glitchPosStatistic[STATISTIC_COUNT];
+static uint32_t glitchPosMissing[STATISTIC_COUNT];
 static uint32_t set_rx_pin[1];
 static uint8_t rxBuffer[3];
 extern DMA_HandleTypeDef hdma_tim2_up;
@@ -106,7 +108,6 @@ void SystemClock_Config(void);
 const char transmitData[] = "\x03";
 int validCounter = 0;
 int errorCounter = 0;
-uint32_t glitchPosStatistic[STATISTIC_COUNT];
 uint32_t glitchStart = 0;
 uint32_t glitchEnd = 0;
 int sweep = 0;
@@ -183,20 +184,20 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
    uint32_t max = 1;
    for (int n = 0; n < STATISTIC_COUNT; n++)
    {
-      if (glitchPosStatistic[n] > max)
+      if (glitchPosStatistic[n] + glitchPosMissing[n] > max)
       {
-         max = glitchPosStatistic[n];
+         max = glitchPosStatistic[n] + glitchPosMissing[n];
       }
    }
    for (int n = 0; n < STATISTIC_COUNT; n++)
    {
       #if SW_SWEEP_START_AT_STARTBIT
-      uint32_t dacValue = (glitchPosStatistic[n] * DAC_MAX) / max;
+      uint32_t dacValue = ((glitchPosStatistic[n] + glitchPosMissing[n])* DAC_MAX) / max;
       if (dacValue > 0)
       {
          dac_buffer[n] = dacValue;
       }
-      patternBuffer[n] |= (glitchPosStatistic[n] > 0) ? SET_RX_PIN : CLR_RX_PIN;
+      patternBuffer[n] |= (dacValue > 0) ? SET_RX_PIN : CLR_RX_PIN;
       #else
       dac_buffer[glitchStart + n] = (glitchPosStatistic[n] * DAC_MAX) / max;
       #endif
@@ -337,7 +338,14 @@ int main(void)
             #endif
             if (glitchPos < STATISTIC_COUNT)
             {
-               glitchPosStatistic[glitchStart + glitchPos] += 1;
+               if (rxEd)
+               {
+                  glitchPosStatistic[glitchStart + glitchPos] += 1;
+               }
+               else
+               {
+                  glitchPosMissing[glitchStart + glitchPos] += 1;
+               }
             }
          }
       }
@@ -361,7 +369,7 @@ int main(void)
                printf("[%u]->%u\n", (unsigned int) n, (unsigned int) bitindex);
                bitindex++;
             }
-            printf("[%3u]: %4u\n", (unsigned int) n, (unsigned int) glitchPosStatistic[n]);
+            printf("[%3u]: %4u, %4u\n", (unsigned int) n, (unsigned int) glitchPosStatistic[n], (unsigned int) glitchPosMissing[n]);
          }
       }
       HAL_StatusTypeDef error0 = HAL_DMA_PollForTransfer(&hdma_tim2_ch1, HAL_DMA_FULL_TRANSFER, 100);
