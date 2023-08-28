@@ -69,14 +69,14 @@
 #define DATA_PIN_MASK (0xffffffff ^ SET_DATA_PIN ^ CLR_DATA_PIN)
 
 #define BAUD_RATE 19200
-#define BIT_WIDTH ((4000000 + BAUD_RATE /2) / BAUD_RATE)
+#define TIMER_FREQUENCY 4000000
+#define BIT_WIDTH ((TIMER_FREQUENCY + BAUD_RATE /2) / BAUD_RATE)
 
 #define GLITCH_WIDTH 1
 
 #define  PATTERN_BUFFER_SIZE ((( BIT_WIDTH * 11) * 2) + BIT_WIDTH * 5)
 #if SW_SWEEP_START_AT_STARTBIT
 #define STATISTIC_COUNT PATTERN_BUFFER_SIZE
-#define TIMER_FREQUENCY 4000000
 #else
 #define STATISTIC_COUNT (BIT_WIDTH + BIT_WIDTH / 5)
 #endif
@@ -238,35 +238,35 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
   */
 int main(void)
 {
-   /* USER CODE BEGIN 1 */
+  /* USER CODE BEGIN 1 */
 
-   /* USER CODE END 1 */
+  /* USER CODE END 1 */
 
-   /* MCU Configuration--------------------------------------------------------*/
+  /* MCU Configuration--------------------------------------------------------*/
 
-   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-   HAL_Init();
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
 
-   /* USER CODE BEGIN Init */
+  /* USER CODE BEGIN Init */
 
-   /* USER CODE END Init */
+  /* USER CODE END Init */
 
-   /* Configure the system clock */
-   SystemClock_Config();
+  /* Configure the system clock */
+  SystemClock_Config();
 
-   /* USER CODE BEGIN SysInit */
+  /* USER CODE BEGIN SysInit */
 
-   /* USER CODE END SysInit */
+  /* USER CODE END SysInit */
 
-   /* Initialize all configured peripherals */
-   MX_GPIO_Init();
-   MX_DMA_Init();
-   MX_USART2_UART_Init();
-   MX_TIM2_Init();
-   MX_USART1_UART_Init();
-   MX_RNG_Init();
-   MX_DAC1_Init();
-   /* USER CODE BEGIN 2 */
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_USART2_UART_Init();
+  MX_TIM2_Init();
+  MX_USART1_UART_Init();
+  MX_RNG_Init();
+  MX_DAC1_Init();
+  /* USER CODE BEGIN 2 */
 //   __disable_irq();
    HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
    uint16_t glitchPos = 0;
@@ -299,16 +299,16 @@ int main(void)
    TIM2->DIER |= TIM_DIER_CC1DE;   // set UDE bit (update dma request enable)
 
 
-   /* USER CODE END 2 */
+  /* USER CODE END 2 */
 
-   /* Infinite loop */
-   /* USER CODE BEGIN WHILE */
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 0);
    while (1)
    {
-      /* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
-      /* USER CODE BEGIN 3 */
+    /* USER CODE BEGIN 3 */
       uint16_t rxEd = 0;
       HAL_StatusTypeDef uartExReceiveToIdle = HAL_UARTEx_ReceiveToIdle(&huart1, rxBuffer, sizeof(rxBuffer), &rxEd, 50);
       HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -443,7 +443,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
