@@ -114,6 +114,8 @@ void PrepareNextGlitch();
 
 bool WaitForPatternFinish();
 
+void StartPattern();
+
 /* USER CODE BEGIN 0 */
 const char transmitData[] = "\x03";
 int validCounter = 0;
@@ -226,6 +228,11 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
       huart1.Instance->RDR;
    }
    huart1.Instance->RQR = USART_RQR_RXFRQ;
+}
+//---------------------------------------------------------------------------
+//---------------------------------------------------------------------------
+void StartPattern()
+{
    HAL_StatusTypeDef error0 = HAL_DMA_Start(&hdma_tim2_up, (uint32_t) patternBuffer, (uint32_t) &(GPIOC->BSRR), PATTERN_BUFFER_SIZE);
    HAL_StatusTypeDef error1 = HAL_DMA_Start(&hdma_tim2_ch1, (uint32_t) dac_buffer, (uint32_t) &(hdac1.Instance->DHR12R1), PATTERN_BUFFER_SIZE);
    HAL_StatusTypeDef error2 = HAL_DMA_Start(&hdma_usart1_rx, (uint32_t) set_rx_pin, (uint32_t) &(GPIOC->BSRR), 1);
@@ -421,6 +428,7 @@ int main(void)
 
       /* USER CODE BEGIN 3 */
       CalculatePattern(glitchPos, glitchWidth, false);
+      StartPattern();
       ReceiveExamine();
       CheckTerminal();
       bool wait = WaitForPatternFinish();
@@ -431,6 +439,9 @@ int main(void)
       else
       {
       }
+      uint8_t txBuffer [3] = {0xAA, 0xAA, 0xAA};
+      HAL_StatusTypeDef uartTransmit = HAL_UART_Transmit(&huart1, txBuffer, sizeof(txBuffer), 10);
+
    }
    /* USER CODE END 3 */
 }
