@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="ST_link" type="com.jetbrains.cidr.embedded.customgdbserver.type" factoryName="com.jetbrains.cidr.embedded.customgdbserver.factory" PROGRAM_PARAMS="-p 2331 --verify --swd -cp &quot;$ST_CUBE_PROG_BIN$&quot;" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="Stm32L4_UART_Glitch" TARGET_NAME="Stm32L4_UART_Glitch.elf" CONFIG_NAME="Debug" version="1" RUN_TARGET_PROJECT_NAME="Stm32L4_UART_Glitch" RUN_TARGET_NAME="Stm32L4_UART_Glitch.elf">
-    <custom-gdb-server version="1" gdb-connect="localhost:2331" executable="C:\ST\STM32CubeIDE_1.5.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_1.6.0.202101291314\tools\bin\ST-LINK_gdbserver.exe" warmup-ms="0" download-type="UPDATED_ONLY" reset-cmd="monitor reset" reset-type="AFTER_DOWNLOAD">
+    <custom-gdb-server version="1" gdb-connect="localhost:2331" executable="C:\ST\STM32CubeIDE_1.13.1\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.0.202305091550\tools\bin\ST-LINK_gdbserver.exe" warmup-ms="0" download-type="UPDATED_ONLY" reset-cmd="monitor reset" reset-type="AFTER_DOWNLOAD">
       <debugger kind="GDB" isBundled="true" />
     </custom-gdb-server>
     <method v="2">

@@ -72,7 +72,7 @@
 #define TIMER_FREQUENCY 4000000
 #define BIT_WIDTH ((TIMER_FREQUENCY + BAUD_RATE /2) / BAUD_RATE)
 
-#define GLITCH_WIDTH 1
+#define GLITCH_WIDTH (BIT_WIDTH/16)
 
 #define  PATTERN_BUFFER_SIZE ((( BIT_WIDTH * 11) * 2) + BIT_WIDTH * 5)
 #if SW_SWEEP_START_AT_STARTBIT
@@ -85,6 +85,8 @@ static uint32_t patternBuffer[PATTERN_BUFFER_SIZE];
 static uint16_t dac_buffer[PATTERN_BUFFER_SIZE];
 static uint32_t glitchPosStatistic[STATISTIC_COUNT];
 static uint32_t glitchPosMissing[STATISTIC_COUNT];
+uint16_t glitchPos = 0;
+uint16_t glitchWidth = GLITCH_WIDTH;
 static uint32_t set_rx_pin[1];
 static uint8_t rxBuffer[3];
 extern DMA_HandleTypeDef hdma_tim2_up;
@@ -104,6 +106,14 @@ void SystemClock_Config(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
+void ReceiveExamine();
+
+void CheckTerminal();
+
+void PrepareNextGlitch();
+
+bool WaitForPatternFinish();
+
 /* USER CODE BEGIN 0 */
 const char transmitData[] = "\x03";
 int validCounter = 0;
@@ -127,7 +137,7 @@ void CalculateUart(uint32_t maskch1, uint32_t maskch2)
       y_val += bitCount;
       if (y_val >= byteWidth)
       {
-         y ++;
+         y++;
          y_val -= byteWidth;
          bitPositions[y] = n;
       }
@@ -192,7 +202,7 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
    for (int n = 0; n < STATISTIC_COUNT; n++)
    {
       #if SW_SWEEP_START_AT_STARTBIT
-      uint32_t dacValue = ((glitchPosStatistic[n] + glitchPosMissing[n])* DAC_MAX) / max;
+      uint32_t dacValue = ((glitchPosStatistic[n] + glitchPosMissing[n]) * DAC_MAX) / max;
       if (dacValue > 0)
       {
          dac_buffer[n] = dacValue;
@@ -230,6 +240,110 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
       printf("error: %u %u %u\n", error0, error1, error2);
    }
 }
+//---------------------------------------------------------------------------
+bool WaitForPatternFinish()
+{
+   HAL_StatusTypeDef error0 = HAL_DMA_PollForTransfer(&hdma_tim2_ch1, HAL_DMA_FULL_TRANSFER, 100);
+   HAL_StatusTypeDef error1 = HAL_DMA_PollForTransfer(&hdma_tim2_up, HAL_DMA_FULL_TRANSFER, 100);
+   HAL_StatusTypeDef error2 = HAL_DMA_Abort(&hdma_usart1_rx);
+   bool success = (error0 == HAL_OK) && (error1 == HAL_OK) && (error2 == HAL_OK);
+   if (!success)
+   {
+      printf("WaitForPatternFinish error: %u %u %u\n", error0, error1, error2);
+   }
+   return success;
+}
+//---------------------------------------------------------------------------
+void PrepareNextGlitch()
+{
+   HAL_TIM_Base_Stop(&htim2);
+   #if SW_RANDOMIZED_GLITCH_POS
+   uint32_t nr;
+      HAL_RNG_GenerateRandomNumber(&hrng, &nr);
+      glitchPos = nr & 0x1ff;
+   #endif
+#if SW_SWEEP_GLITCH_POS
+   glitchPos += 1;
+   if (glitchStart + glitchPos >= glitchEnd)
+   {
+      glitchPos = 0;
+      sweep++;
+      printf("sweep: %d\n", sweep);
+   }
+#endif
+}
+//---------------------------------------------------------------------------
+void CheckTerminal()
+{
+   int rxTerminalCount = 0;
+   while (__HAL_UART_GET_FLAG(&huart2, UART_FLAG_RXNE))
+   {
+      rxTerminalCount++;
+      huart2.Instance->RDR;
+   }
+   if (rxTerminalCount)
+   {
+      uint32_t bitindex = 0;
+      while (bitPositions[bitindex] < glitchStart)
+      {
+         bitindex++;
+      }
+      for (uint32_t n = glitchStart; n < glitchEnd; n++)
+      {
+         if (bitPositions[bitindex] == n)
+         {
+            printf("[%u]->%u\n", (unsigned int) n, (unsigned int) bitindex);
+            bitindex++;
+         }
+         printf("[%3u]: %4u, %4u\n", (unsigned int) n, (unsigned int) glitchPosStatistic[n], (unsigned int) glitchPosMissing[n]);
+      }
+   }
+}
+//---------------------------------------------------------------------------
+void ReceiveExamine()
+{
+   uint16_t rxEd = 0;
+   HAL_StatusTypeDef uartExReceiveToIdle = HAL_UARTEx_ReceiveToIdle(&huart1, rxBuffer, sizeof(rxBuffer), &rxEd, 10);
+   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+   if (rxEd || uartExReceiveToIdle != HAL_OK)
+   {
+      validCounter++;
+      rxBuffer[rxEd] = 0;
+      int invalid = rxEd != strlen(transmitData);
+      if (!invalid)
+      {
+         invalid = strcmp(rxBuffer, transmitData) != 0;
+      }
+      if (invalid)
+      {
+         HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+         errorCounter++;
+         printf("[%5d/%5d] rx:%d", errorCounter, validCounter, rxEd);
+         for (size_t index = 0; index < rxEd; index++)
+         {
+            printf(" %02x", rxBuffer[index]);
+         }
+         printf(", pos, width: %u, %u\n", glitchPos, glitchWidth);
+         #if SW_BUTTON_WAIT
+         while (HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin))
+         {
+         }
+         #endif
+         if (glitchPos < STATISTIC_COUNT)
+         {
+            if (rxEd)
+            {
+               glitchPosStatistic[glitchStart + glitchPos] += 1;
+            }
+            else
+            {
+               glitchPosMissing[glitchStart + glitchPos] += 1;
+            }
+         }
+      }
+   }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -238,39 +352,37 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
   */
 int main(void)
 {
-  /* USER CODE BEGIN 1 */
+   /* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
+   /* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
+   /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+   HAL_Init();
 
-  /* USER CODE BEGIN Init */
+   /* USER CODE BEGIN Init */
 
-  /* USER CODE END Init */
+   /* USER CODE END Init */
 
-  /* Configure the system clock */
-  SystemClock_Config();
+   /* Configure the system clock */
+   SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
+   /* USER CODE BEGIN SysInit */
 
-  /* USER CODE END SysInit */
+   /* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_USART2_UART_Init();
-  MX_TIM2_Init();
-  MX_USART1_UART_Init();
-  MX_RNG_Init();
-  MX_DAC1_Init();
-  /* USER CODE BEGIN 2 */
+   /* Initialize all configured peripherals */
+   MX_GPIO_Init();
+   MX_DMA_Init();
+   MX_USART2_UART_Init();
+   MX_TIM2_Init();
+   MX_USART1_UART_Init();
+   MX_RNG_Init();
+   MX_DAC1_Init();
+   /* USER CODE BEGIN 2 */
 //   __disable_irq();
    HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
-   uint16_t glitchPos = 0;
-   uint16_t glitchWidth = GLITCH_WIDTH;
    glitchStart = 11 * BIT_WIDTH - 10;
    glitchEnd = 13 * BIT_WIDTH + 10;
    HAL_DMA_DeInit(&hdma_usart1_rx);
@@ -278,7 +390,6 @@ int main(void)
    HAL_DMA_Init(&hdma_usart1_rx);
    ATOMIC_SET_BIT(huart1.Instance->CR3, USART_CR3_DMAR);
 
-   CalculatePattern(glitchPos, glitchWidth, false);
    memset(dac_buffer, 0, sizeof(dac_buffer));
    set_rx_pin[0] = 0;
 
@@ -299,108 +410,29 @@ int main(void)
    TIM2->DIER |= TIM_DIER_CC1DE;   // set UDE bit (update dma request enable)
 
 
-  /* USER CODE END 2 */
+   /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+   /* Infinite loop */
+   /* USER CODE BEGIN WHILE */
    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 0);
    while (1)
    {
-    /* USER CODE END WHILE */
+      /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-      uint16_t rxEd = 0;
-      HAL_StatusTypeDef uartExReceiveToIdle = HAL_UARTEx_ReceiveToIdle(&huart1, rxBuffer, sizeof(rxBuffer), &rxEd, 50);
-      HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-      if (rxEd || uartExReceiveToIdle != HAL_OK)
+      /* USER CODE BEGIN 3 */
+      CalculatePattern(glitchPos, glitchWidth, false);
+      ReceiveExamine();
+      CheckTerminal();
+      bool wait = WaitForPatternFinish();
+      if (wait)
       {
-         validCounter++;
-         rxBuffer[rxEd] = 0;
-         int invalid = rxEd != strlen(transmitData);
-         if (!invalid)
-         {
-            invalid = strcmp(rxBuffer, transmitData) != 0;
-         }
-         if (invalid)
-         {
-            HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-            errorCounter++;
-            printf("[%5d/%5d] rx:%d", errorCounter, validCounter, rxEd);
-            for (size_t index = 0; index < rxEd; index++)
-            {
-               printf(" %02x", rxBuffer[index]);
-            }
-            printf(", pos, width: %u, %u\n", glitchPos, glitchWidth);
-            #if SW_BUTTON_WAIT
-            while (HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin))
-            {
-            }
-            #endif
-            if (glitchPos < STATISTIC_COUNT)
-            {
-               if (rxEd)
-               {
-                  glitchPosStatistic[glitchStart + glitchPos] += 1;
-               }
-               else
-               {
-                  glitchPosMissing[glitchStart + glitchPos] += 1;
-               }
-            }
-         }
-      }
-      int rxTerminalCount = 0;
-      while (__HAL_UART_GET_FLAG(&huart2, UART_FLAG_RXNE))
-      {
-         rxTerminalCount++;
-         huart2.Instance->RDR;
-      }
-      if (rxTerminalCount)
-      {
-         uint32_t bitindex = 0;
-         while (bitPositions[bitindex] < glitchStart)
-         {
-            bitindex++;
-         }
-         for (uint32_t n = glitchStart; n < glitchEnd; n++)
-         {
-            if (bitPositions[bitindex] == n)
-            {
-               printf("[%u]->%u\n", (unsigned int) n, (unsigned int) bitindex);
-               bitindex++;
-            }
-            printf("[%3u]: %4u, %4u\n", (unsigned int) n, (unsigned int) glitchPosStatistic[n], (unsigned int) glitchPosMissing[n]);
-         }
-      }
-      HAL_StatusTypeDef error0 = HAL_DMA_PollForTransfer(&hdma_tim2_ch1, HAL_DMA_FULL_TRANSFER, 100);
-      HAL_StatusTypeDef error1 = HAL_DMA_PollForTransfer(&hdma_tim2_up, HAL_DMA_FULL_TRANSFER, 100);
-      HAL_StatusTypeDef error2 = HAL_DMA_Abort(&hdma_usart1_rx);
-
-      if (error0 == HAL_OK && error1 == HAL_OK && error2 == HAL_OK)
-      {
-         HAL_TIM_Base_Stop(&htim2);
-         #if SW_RANDOMIZED_GLITCH_POS
-         uint32_t nr;
-         HAL_RNG_GenerateRandomNumber(&hrng, &nr);
-         glitchPos = nr & 0x1ff;
-         #endif
-         #if SW_SWEEP_GLITCH_POS
-         glitchPos += 1;
-         if (glitchStart + glitchPos >= glitchEnd)
-         {
-            glitchPos = 0;
-            sweep++;
-            printf("sweep: %d\n", sweep);
-         }
-         #endif
-         CalculatePattern(glitchPos, glitchWidth, false);
+         PrepareNextGlitch();
       }
       else
       {
-         printf("error: %u %u %u\n", error0, error1, error2);
       }
    }
-  /* USER CODE END 3 */
+   /* USER CODE END 3 */
 }
 
 /**
@@ -409,46 +441,46 @@ int main(void)
   */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure the main internal regulator output voltage
-  */
-  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+   /** Configure the main internal regulator output voltage
+   */
+   if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
+   {
+      Error_Handler();
+   }
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 20;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+   /** Initializes the RCC Oscillators according to the specified parameters
+   * in the RCC_OscInitTypeDef structure.
+   */
+   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+   RCC_OscInitStruct.PLL.PLLM = 1;
+   RCC_OscInitStruct.PLL.PLLN = 20;
+   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
+   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+   {
+      Error_Handler();
+   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
+   /** Initializes the CPU, AHB and APB buses clocks
+   */
+   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+                                 | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
-  {
-    Error_Handler();
-  }
+   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+   {
+      Error_Handler();
+   }
 }
 
 /* USER CODE BEGIN 4 */
@@ -467,13 +499,13 @@ int _write(int file, char *ptr, int len)
   */
 void Error_Handler(void)
 {
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
-  /* USER CODE END Error_Handler_Debug */
+   /* USER CODE BEGIN Error_Handler_Debug */
+   /* User can add his own implementation to report the HAL error return state */
+   __disable_irq();
+   while (1)
+   {
+   }
+   /* USER CODE END Error_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
