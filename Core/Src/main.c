@@ -48,7 +48,8 @@
 #define SW_RANDOMIZED_GLITCH_POS 0
 #define SW_SWEEP_GLITCH_POS 1
 #define SW_SWEEP_START_AT_STARTBIT 1
-
+#define SW_VERBOSE 0
+#define SW_STOP_BITS 1
 
 /* USER CODE END PM */
 
@@ -89,6 +90,7 @@ uint16_t glitchPos = 0;
 uint16_t glitchWidth = GLITCH_WIDTH;
 static uint32_t set_rx_pin[1];
 static uint8_t rxBuffer[3];
+static uint8_t txBuffer[3] = {0xAA, 0xAA, 0xAA};
 extern DMA_HandleTypeDef hdma_tim2_up;
 extern DMA_HandleTypeDef hdma_tim2_ch1;
 extern DMA_HandleTypeDef hdma_usart1_rx;
@@ -117,7 +119,7 @@ bool WaitForPatternFinish();
 void StartPattern();
 
 /* USER CODE BEGIN 0 */
-const char transmitData[] = "\x03";
+const char transmitData[] = "\x33";
 int validCounter = 0;
 int errorCounter = 0;
 uint32_t glitchStart = 0;
@@ -181,8 +183,6 @@ void CalculatePattern(uint16_t glitchPos, uint16_t glitchWidth, bool glitchLevel
    mask = (mask << 1) + 0;
    mask = (mask << 1) + 1;
    CalculateUart(mask, ref << 1);
-   patternBuffer[0] |= CLR_RX_PIN;
-   patternBuffer[10] |= SET_RX_PIN;
 
    if (glitchWidth > 0)
    {
@@ -325,12 +325,14 @@ void ReceiveExamine()
       {
          HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
          errorCounter++;
+         #if SW_VERBOSE
          printf("[%5d/%5d] rx:%d", errorCounter, validCounter, rxEd);
          for (size_t index = 0; index < rxEd; index++)
          {
             printf(" %02x", rxBuffer[index]);
          }
          printf(", pos, width: %u, %u\n", glitchPos, glitchWidth);
+         #endif
          #if SW_BUTTON_WAIT
          while (HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin))
          {
@@ -349,6 +351,9 @@ void ReceiveExamine()
          }
       }
    }
+   txBuffer[0] = rxBuffer[0];
+   txBuffer[1] = rxEd;
+   txBuffer[2] = '\n';
 }
 
 /* USER CODE END 0 */
@@ -427,9 +432,11 @@ int main(void)
       /* USER CODE END WHILE */
 
       /* USER CODE BEGIN 3 */
+      #if SW_STOP_BITS
       __HAL_UART_DISABLE(&huart1);
       MODIFY_REG(huart1.Instance->CR2, USART_CR2_STOP, UART_STOPBITS_0_5);
       __HAL_UART_ENABLE(&huart1);
+      #endif
       CalculatePattern(glitchPos, glitchWidth, false);
       StartPattern();
       ReceiveExamine();
@@ -442,12 +449,12 @@ int main(void)
       else
       {
       }
+      #if SW_STOP_BITS
       __HAL_UART_DISABLE(&huart1);
       MODIFY_REG(huart1.Instance->CR2, USART_CR2_STOP, UART_STOPBITS_2);
       __HAL_UART_ENABLE(&huart1);
-      uint8_t txBuffer [3] = {0xAA, 0xAA, 0xAA};
+      #endif
       HAL_StatusTypeDef uartTransmit = HAL_UART_Transmit(&huart1, txBuffer, sizeof(txBuffer), 10);
-
    }
    /* USER CODE END 3 */
 }
