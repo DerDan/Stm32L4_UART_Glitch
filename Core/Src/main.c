@@ -427,6 +427,9 @@ int main(void)
       /* USER CODE END WHILE */
 
       /* USER CODE BEGIN 3 */
+      __HAL_UART_DISABLE(&huart1);
+      MODIFY_REG(huart1.Instance->CR2, USART_CR2_STOP, UART_STOPBITS_0_5);
+      __HAL_UART_ENABLE(&huart1);
       CalculatePattern(glitchPos, glitchWidth, false);
       StartPattern();
       ReceiveExamine();
@@ -439,6 +442,9 @@ int main(void)
       else
       {
       }
+      __HAL_UART_DISABLE(&huart1);
+      MODIFY_REG(huart1.Instance->CR2, USART_CR2_STOP, UART_STOPBITS_2);
+      __HAL_UART_ENABLE(&huart1);
       uint8_t txBuffer [3] = {0xAA, 0xAA, 0xAA};
       HAL_StatusTypeDef uartTransmit = HAL_UART_Transmit(&huart1, txBuffer, sizeof(txBuffer), 10);
 
